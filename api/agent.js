@@ -4,11 +4,11 @@ import * as cheerio from 'cheerio';
 import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
 
-const WEBSITES = ['https://www.bookdwellia.com'];
-const YOUR_EMAIL         = process.env.YOUR_EMAIL;
-const PAGESPEED_API_KEY  = process.env.PAGESPEED_API_KEY;
-const ANTHROPIC_API_KEY  = process.env.ANTHROPIC_API_KEY;
-const GOOGLE_SHEET_ID    = process.env.GOOGLE_SHEET_ID;
+const WEBSITES         = ['https://www.bookdwellia.com'];
+const YOUR_EMAIL       = process.env.YOUR_EMAIL;
+const PAGESPEED_API_KEY = process.env.PAGESPEED_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GOOGLE_SHEET_ID  = process.env.GOOGLE_SHEET_ID;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -25,9 +25,9 @@ async function crawlSite(url) {
     const images   = $('img').map((i, el) => ({ src: $(el).attr('src'), alt: $(el).attr('alt') })).get();
     const links    = $('a[href]').map((i, el) => $(el).attr('href')).get();
 
-    if (!title)                issues.push('CRITICAL: No title tag found');
-    else if (title.length < 30) issues.push(`WARNING: Title too short (${title.length} chars) — aim for 50–60`);
-    else if (title.length > 60) issues.push(`WARNING: Title too long (${title.length} chars) — aim for 50–60`);
+    if (!title)                 issues.push('CRITICAL: No title tag found');
+    else if (title.length < 30) issues.push(`WARNING: Title too short (${title.length} chars) — aim for 50-60`);
+    else if (title.length > 60) issues.push(`WARNING: Title too long (${title.length} chars) — aim for 50-60`);
 
     if (!metaDesc)                  issues.push('CRITICAL: No meta description found');
     else if (metaDesc.length < 120) issues.push(`WARNING: Meta description too short (${metaDesc.length} chars)`);
@@ -59,9 +59,9 @@ async function getPageSpeed(url) {
       performance:   Math.round((cats.performance?.score   || 0) * 100),
       accessibility: Math.round((cats.accessibility?.score || 0) * 100),
       seo:           Math.round((cats.seo?.score           || 0) * 100),
-      lcp: audits['largest-contentful-paint']?.displayValue  || 'unknown',
-      cls: audits['cumulative-layout-shift']?.displayValue   || 'unknown',
-      tbt: audits['total-blocking-time']?.displayValue       || 'unknown',
+      lcp: audits['largest-contentful-paint']?.displayValue || 'unknown',
+      cls: audits['cumulative-layout-shift']?.displayValue  || 'unknown',
+      tbt: audits['total-blocking-time']?.displayValue      || 'unknown',
     };
   } catch (e) {
     return { error: `PageSpeed failed: ${e.message}` };
@@ -70,7 +70,7 @@ async function getPageSpeed(url) {
 
 async function analyzeWithClaude(crawlData, speedData, url) {
   const prompt = `You are an expert SEO consultant. Analyze this data and provide:
-1. An overall SEO health score (0–100)
+1. An overall SEO health score (0-100)
 2. Top 3 critical issues to fix this week (be specific)
 3. Top 3 improvements ranked by ranking impact
 4. One content suggestion to improve search visibility
@@ -166,4 +166,12 @@ async function sendEmail(allResults) {
     </small>
   `;
 
-  await transporter.sendM
+  await transporter.sendMail({ from: YOUR_EMAIL, to: YOUR_EMAIL, subject, html });
+}
+
+export default async function handler(req, res) {
+  try {
+    console.log('SEO Agent starting...');
+    const allResults = [];
+
+    for (const url of
