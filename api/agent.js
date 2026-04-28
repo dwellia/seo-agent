@@ -9,9 +9,32 @@ const YOUR_EMAIL = process.env.YOUR_EMAIL;
 const PAGESPEED_API_KEY = process.env.PAGESPEED_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+async function getSearchConsoleData(url) {
+  try {
+    const auth = new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
+    auth.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+    const searchconsole = google.searchconsole({ version: 'v1', auth });
+    const res = await searchconsole.searchanalytics.query({
+      siteUrl: url,
+      requestBody: {
+        startDate: new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        endDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        dimensions: ['query'],
+        rowLimit: 10,
+      },
+    });
+    return res.data.rows || [];
+  } catch (e) {
+    return { error: `Search Console failed: ${e.message}` };
+  }
+}
 
 async function crawlSite(url) {
   const issues = [];
@@ -61,7 +84,7 @@ async function getPageSpeed(url) {
   }
 }
 
-async function analyzeWithClaude(crawlData, speedData, url) {
+async function analyzeWithClaude(crawlData, speedData, url, rankings) {
   const prompt = `You are an expert SEO consultant. Analyze this data and provide:
 1. An overall SEO health score (0-100)
 2. Top 3 critical issues to fix this week (be specific)
@@ -77,6 +100,9 @@ ${JSON.stringify(crawlData, null, 2)}
 PAGESPEED SCORES:
 ${JSON.stringify(speedData, null, 2)}
 
+TOP SEARCH CONSOLE KEYWORDS (last 28 days):
+${JSON.stringify(rankings, null, 2)}
+
 Be specific and actionable. Plain text with clear section headers. Concise enough to read in 3 minutes.`;
 
   const msg = await anthropic.messages.create({
@@ -87,13 +113,14 @@ Be specific and actionable. Plain text with clear section headers. Concise enoug
   return msg.content[0].text;
 }
 
-async function saveToSheets(crawlData, speedData, analysis, url) {
+async function saveToSheets(crawlData, speedData, analysis, url, rankings) {
   const auth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
   const sheets = google.sheets({ version: 'v4', auth });
   const date = new Date().toLocaleDateString();
+
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
     range: 'Weekly Reports!A:G',
@@ -110,6 +137,7 @@ async function saveToSheets(crawlData, speedData, analysis, url) {
       ]]
     }
   });
+
   if (crawlData.issues?.length > 0) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
@@ -120,12 +148,29 @@ async function saveToSheets(crawlData, speedData, analysis, url) {
       }
     });
   }
+
+  if (rankings && Array.isArray(rankings) && rankings.length > 0) {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: GOOGLE_SHEET_ID,
+      range: 'Rankings History!A:E',
+      valueInputOption: 'USER_ENTERED',
+      resource: {
+        values: rankings.map(row => [
+          date,
+          url,
+          row.keys[0],
+          Math.round(row.position * 10) / 10,
+          row.clicks,
+        ])
+      }
+    });
+  }
 }
 
 async function sendEmail(allResults) {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
-    auth: { user: YOUR_EMAIL, pass: GMAIL_APP_PASSWORD }
+    auth: { user: YOUR_EMAIL, pass: (GMAIL_APP_PASSWORD || '').replace(/\s/g, '') }
   });
   const totalIssues = allResults.reduce((sum, r) => sum + (r.crawl.issues?.length || 0), 0);
   const subject = `SEO Weekly Report — ${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found · ${new Date().toLocaleDateString()}`;
@@ -141,6 +186,14 @@ async function sendEmail(allResults) {
     </ul>
     <h3>Issues Found (${r.crawl.issues?.length || 0})</h3>
     <ul>${(r.crawl.issues || []).map(i => `<li>${i}</li>`).join('')}</ul>
+    <h3>Top Keywords (last 28 days)</h3>
+    ${Array.isArray(r.rankings) && r.rankings.length > 0
+      ? `<table border="1" cellpadding="6" style="border-collapse:collapse">
+          <tr><th>Keyword</th><th>Avg Position</th><th>Clicks</th></tr>
+          ${r.rankings.map(row => `<tr><td>${row.keys[0]}</td><td>${Math.round(row.position * 10) / 10}</td><td>${row.clicks}</td></tr>`).join('')}
+        </table>`
+      : '<p>No Search Console data yet — check back in 1-2 weeks as data builds up.</p>'
+    }
     <h3>AI Analysis &amp; Recommendations</h3>
     <pre style="font-family:sans-serif;white-space:pre-wrap">${r.analysis}</pre>
     <hr>
@@ -164,9 +217,10 @@ export default async function handler(req, res) {
       console.log(`Analyzing ${url}...`);
       const crawl = await crawlSite(url);
       const speed = await getPageSpeed(url);
-      const analysis = await analyzeWithClaude(crawl, speed, url);
-      await saveToSheets(crawl, speed, analysis, url);
-      allResults.push({ url, crawl, speed, analysis });
+      const rankings = await getSearchConsoleData(url);
+      const analysis = await analyzeWithClaude(crawl, speed, url, rankings);
+      await saveToSheets(crawl, speed, analysis, url, rankings);
+      allResults.push({ url, crawl, speed, analysis, rankings });
     }
     await sendEmail(allResults);
     console.log('SEO Agent complete.');
