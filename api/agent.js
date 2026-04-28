@@ -80,7 +80,7 @@ ${JSON.stringify(speedData, null, 2)}
 Be specific and actionable. Plain text with clear section headers. Concise enough to read in 3 minutes.`;
 
   const msg = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-5',
     max_tokens: 1000,
     messages: [{ role: 'user', content: prompt }],
   });
