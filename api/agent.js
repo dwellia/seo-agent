@@ -4,11 +4,11 @@ import * as cheerio from 'cheerio';
 import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
 
-const WEBSITES         = ['https://www.bookdwellia.com'];
-const YOUR_EMAIL       = process.env.YOUR_EMAIL;
+const WEBSITES = ['https://www.bookdwellia.com'];
+const YOUR_EMAIL = process.env.YOUR_EMAIL;
 const PAGESPEED_API_KEY = process.env.PAGESPEED_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const GOOGLE_SHEET_ID  = process.env.GOOGLE_SHEET_ID;
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -18,30 +18,23 @@ async function crawlSite(url) {
   try {
     const res = await axios.get(url, { timeout: 10000 });
     const $ = cheerio.load(res.data);
-
-    const title    = $('title').text();
+    const title = $('title').text();
     const metaDesc = $('meta[name="description"]').attr('content') || '';
-    const h1s      = $('h1').map((i, el) => $(el).text()).get();
-    const images   = $('img').map((i, el) => ({ src: $(el).attr('src'), alt: $(el).attr('alt') })).get();
-    const links    = $('a[href]').map((i, el) => $(el).attr('href')).get();
-
-    if (!title)                 issues.push('CRITICAL: No title tag found');
+    const h1s = $('h1').map((i, el) => $(el).text()).get();
+    const images = $('img').map((i, el) => ({ src: $(el).attr('src'), alt: $(el).attr('alt') })).get();
+    const links = $('a[href]').map((i, el) => $(el).attr('href')).get();
+    if (!title) issues.push('CRITICAL: No title tag found');
     else if (title.length < 30) issues.push(`WARNING: Title too short (${title.length} chars) — aim for 50-60`);
     else if (title.length > 60) issues.push(`WARNING: Title too long (${title.length} chars) — aim for 50-60`);
-
-    if (!metaDesc)                  issues.push('CRITICAL: No meta description found');
+    if (!metaDesc) issues.push('CRITICAL: No meta description found');
     else if (metaDesc.length < 120) issues.push(`WARNING: Meta description too short (${metaDesc.length} chars)`);
     else if (metaDesc.length > 160) issues.push(`WARNING: Meta description too long (${metaDesc.length} chars)`);
-
     if (h1s.length === 0) issues.push('CRITICAL: No H1 tag found');
-    if (h1s.length > 1)   issues.push(`WARNING: Multiple H1 tags (${h1s.length}) — use only one`);
-
+    if (h1s.length > 1) issues.push(`WARNING: Multiple H1 tags (${h1s.length}) — use only one`);
     const noAlt = images.filter(img => !img.alt).length;
     if (noAlt > 0) issues.push(`WARNING: ${noAlt} image(s) missing alt text`);
-
     const httpLinks = links.filter(l => l && l.startsWith('http:')).length;
     if (httpLinks > 0) issues.push(`WARNING: ${httpLinks} non-HTTPS link(s) found`);
-
     return { url, title, metaDesc, h1s, totalImages: images.length, noAlt, totalLinks: links.length, issues };
   } catch (e) {
     return { url, issues: [`CRITICAL: Could not crawl — ${e.message}`] };
@@ -53,15 +46,15 @@ async function getPageSpeed(url) {
     const res = await axios.get(
       `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&key=${PAGESPEED_API_KEY}&strategy=mobile`
     );
-    const cats   = res.data.lighthouseResult.categories;
+    const cats = res.data.lighthouseResult.categories;
     const audits = res.data.lighthouseResult.audits;
     return {
-      performance:   Math.round((cats.performance?.score   || 0) * 100),
+      performance: Math.round((cats.performance?.score || 0) * 100),
       accessibility: Math.round((cats.accessibility?.score || 0) * 100),
-      seo:           Math.round((cats.seo?.score           || 0) * 100),
+      seo: Math.round((cats.seo?.score || 0) * 100),
       lcp: audits['largest-contentful-paint']?.displayValue || 'unknown',
-      cls: audits['cumulative-layout-shift']?.displayValue  || 'unknown',
-      tbt: audits['total-blocking-time']?.displayValue      || 'unknown',
+      cls: audits['cumulative-layout-shift']?.displayValue || 'unknown',
+      tbt: audits['total-blocking-time']?.displayValue || 'unknown',
     };
   } catch (e) {
     return { error: `PageSpeed failed: ${e.message}` };
@@ -101,7 +94,6 @@ async function saveToSheets(crawlData, speedData, analysis, url) {
   });
   const sheets = google.sheets({ version: 'v4', auth });
   const date = new Date().toLocaleDateString();
-
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
     range: 'Weekly Reports!A:G',
@@ -110,15 +102,14 @@ async function saveToSheets(crawlData, speedData, analysis, url) {
       values: [[
         date,
         url,
-        speedData.performance   || 'N/A',
-        speedData.seo           || 'N/A',
+        speedData.performance || 'N/A',
+        speedData.seo || 'N/A',
         speedData.accessibility || 'N/A',
         crawlData.issues?.length || 0,
         analysis.substring(0, 500),
       ]]
     }
   });
-
   if (crawlData.issues?.length > 0) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: GOOGLE_SHEET_ID,
@@ -136,10 +127,8 @@ async function sendEmail(allResults) {
     service: 'gmail',
     auth: { user: YOUR_EMAIL, pass: GMAIL_APP_PASSWORD }
   });
-
   const totalIssues = allResults.reduce((sum, r) => sum + (r.crawl.issues?.length || 0), 0);
   const subject = `SEO Weekly Report — ${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found · ${new Date().toLocaleDateString()}`;
-
   const sections = allResults.map(r => `
     <h2>${r.url}</h2>
     <h3>Scores</h3>
@@ -156,7 +145,6 @@ async function sendEmail(allResults) {
     <pre style="font-family:sans-serif;white-space:pre-wrap">${r.analysis}</pre>
     <hr>
   `).join('');
-
   const html = `
     <h1>Weekly SEO Report</h1>
     ${sections}
@@ -165,7 +153,6 @@ async function sendEmail(allResults) {
       <a href="https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}">View full history in Google Sheets</a>
     </small>
   `;
-
   await transporter.sendMail({ from: YOUR_EMAIL, to: YOUR_EMAIL, subject, html });
 }
 
@@ -173,5 +160,19 @@ export default async function handler(req, res) {
   try {
     console.log('SEO Agent starting...');
     const allResults = [];
-
-    for (const url of
+    for (const url of WEBSITES) {
+      console.log(`Analyzing ${url}...`);
+      const crawl = await crawlSite(url);
+      const speed = await getPageSpeed(url);
+      const analysis = await analyzeWithClaude(crawl, speed, url);
+      await saveToSheets(crawl, speed, analysis, url);
+      allResults.push({ url, crawl, speed, analysis });
+    }
+    await sendEmail(allResults);
+    console.log('SEO Agent complete.');
+    res.status(200).json({ success: true, sites: allResults.length });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+}
