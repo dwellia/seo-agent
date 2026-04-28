@@ -9,7 +9,7 @@ const YOUR_EMAIL = process.env.YOUR_EMAIL;
 const PAGESPEED_API_KEY = process.env.PAGESPEED_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
